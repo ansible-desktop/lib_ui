@@ -2046,7 +2046,7 @@ bool IsDiacritic(QChar ch) { // diacritic and variation selectors
 }
 
 bool IsReplacedBySpace(QChar ch) {
-	// Those symbols are replaced by space on the Telegram server,
+	// Those symbols are replaced by space on the Ansible server,
 	// so we replace them as well, for sent / received consistency.
 	//
 	// \xe2\x80[\xa8 - \xac\xad] // 8232 - 8237
