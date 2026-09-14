@@ -445,8 +445,8 @@ youtubePlayIconBg: #e83131c8; // youtube play icon background (when a link to a 
 youtubePlayIconFg: windowFgActive; // youtube play icon arrow (when a link to a youtube video with a webpage preview is sent)
 videoPlayIconBg: #0000007f; // other video play icon background (like when a link to a vimeo video with a webpage preview is sent)
 videoPlayIconFg: #ffffff; // other video play icon arrow (like when a link to a vimeo video with a webpage preview is sent)
-toastBg: #2c3033e5; // toast notification background (like when you click on your t.me link when editing your username)
-toastFg: #ffffff; // toast notification text (like when you click on your t.me link when editing your username)
+toastBg: #2c3033e5; // toast notification background (like when you click on your ansible.su link when editing your username)
+toastFg: #ffffff; // toast notification text (like when you click on your ansible.su link when editing your username)
 
 historyToDownBg: windowBg; // arrow button background (to scroll to the end of the viewed chat)
 historyToDownBgOver: windowBgOver; // arrow button background with mouse over
@@ -682,11 +682,11 @@ statisticsChartLineIndigo: #7f79f3; // represents indigo color on statistical ch
 statisticsChartLinePurple: #9f79e8; // represents purple color on statistical charts
 statisticsChartLineCyan: #40d0ca; // represents cyan color on statistical charts
 
-creditsBg1: #ffb222; // credits icon gradient 1, normal
-creditsBg2: #FFD951; // credits icon gradient 2, light
-creditsBg3: #f0b400; // credits icon gradient 3, dark
-creditsFg: #ba7000; // credits text on light background
-creditsStroke: #da8735; // credits icon stroke
+creditsBg1: #0084ff; // diamond icon gradient 1, normal
+creditsBg2: #4eaaff; // diamond icon gradient 2, light
+creditsBg3: #0084ff; // diamond icon gradient 3, dark
+creditsFg: #0064c8; // diamond text on light background
+creditsStroke: #0064c8; // diamond icon stroke
 currencyFg: #168acd; // currency icon, blue
 
 rankAdminFg: #49a355; // admin badge text and pill, green
