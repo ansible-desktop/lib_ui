@@ -682,11 +682,11 @@ statisticsChartLineIndigo: #7f79f3; // represents indigo color on statistical ch
 statisticsChartLinePurple: #9f79e8; // represents purple color on statistical charts
 statisticsChartLineCyan: #40d0ca; // represents cyan color on statistical charts
 
-creditsBg1: #ffb222; // credits icon gradient 1, normal
-creditsBg2: #FFD951; // credits icon gradient 2, light
-creditsBg3: #f0b400; // credits icon gradient 3, dark
-creditsFg: #ba7000; // credits text on light background
-creditsStroke: #da8735; // credits icon stroke
+creditsBg1: #32ABFE; // credits icon gradient 1, normal
+creditsBg2: #76D8FF; // credits icon gradient 2, light
+creditsBg3: #0084E8; // credits icon gradient 3, dark
+creditsFg: #0058B0; // credits text on light background
+creditsStroke: #0058B0; // credits icon stroke
 currencyFg: #168acd; // currency icon, blue
 
 rankAdminFg: #49a355; // admin badge text and pill, green
