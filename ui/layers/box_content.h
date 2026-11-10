@@ -92,6 +92,7 @@ public:
 		int maxHeight,
 		bool forceCenterPosition = false) = 0;
 	virtual void setNoContentMargin(bool noContentMargin) = 0;
+	virtual void setMinimalTopSkip(int skip) = 0;
 	virtual bool isBoxShown() const = 0;
 	virtual void closeBox() = 0;
 	virtual void hideLayer() = 0;
@@ -139,6 +140,9 @@ public:
 	void setCloseByEscape(bool close) {
 		_closeByEscape = close;
 	}
+	[[nodiscard]] bool closeByEscape() const {
+		return _closeByEscape;
+	}
 	void setCloseByOutsideClick(bool close) {
 		getDelegate()->setCloseByOutsideClick(close);
 	}
@@ -146,6 +150,12 @@ public:
 	void scrollToWidget(not_null<QWidget*> widget);
 
 	virtual void showFinished() {
+	}
+	[[nodiscard]] virtual crl::time layerAnimationDuration() const {
+		return _layerAnimationDuration;
+	}
+	void setLayerAnimationDuration(crl::time duration) {
+		_layerAnimationDuration = duration;
 	}
 	void setCustomCornersFilling(RectParts corners) {
 		getDelegate()->setCustomCornersFilling(corners);
@@ -218,6 +228,9 @@ public:
 			setAttribute(Qt::WA_OpaquePaintEvent, !_noContentMargin);
 		}
 		getDelegate()->setNoContentMargin(noContentMargin);
+	}
+	void setMinimalTopSkip(int skip) {
+		getDelegate()->setMinimalTopSkip(skip);
 	}
 
 	void scrollByDraggingDelta(int delta);
@@ -325,6 +338,8 @@ private:
 	Ui::Animations::Simple _scrollAnimation;
 
 	rpl::event_stream<> _boxClosingStream;
+
+	crl::time _layerAnimationDuration = 0;
 
 };
 

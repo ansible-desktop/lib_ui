@@ -100,6 +100,7 @@ RoundButton {
 	width: pixels;
 	height: pixels;
 	radius: pixels;
+	fullRadius: bool;
 	padding: margins;
 
 	textTop: pixels;
@@ -296,6 +297,7 @@ InputField {
 	textBg: color;
 	textBgActive: color; // Used only with borderRadius.
 	textFg: color;
+	textMarkBg: color;
 	textMargins: margins;
 	textAlign: align;
 
@@ -306,6 +308,7 @@ InputField {
 	placeholderAlign: align;
 	placeholderScale: double;
 	placeholderShift: pixels;
+	placeholderShiftLeft: pixels;
 	placeholderFont: font;
 
 	duration: int;
@@ -490,19 +493,6 @@ MultiSelect {
 	fieldCancelSkip: pixels;
 }
 
-CallButton {
-	button: IconButton;
-	bg: color;
-	bgSize: pixels;
-	bgPosition: point;
-	angle: double;
-	outerRadius: pixels;
-	outerBg: color;
-	label: FlatLabel;
-	cornerButtonPosition: point;
-	cornerButtonBorder: pixels;
-}
-
 InnerDropdown {
 	padding: margins;
 	shadow: Shadow;
@@ -632,7 +622,9 @@ SideBarButton {
 	textFg: color;
 	textFgActive: color;
 	badgeBg: color;
+	badgeBgActive: color;
 	badgeBgMuted: color;
+	badgeBgMutedActive: color;
 	badgeFg: color;
 	ripple: RippleAnimation;
 }
@@ -1037,6 +1029,7 @@ defaultInputField: InputField {
 	textBg: windowBg;
 	textBgActive: windowBg;
 	textFg: windowFg;
+	textMarkBg: windowBgOver;
 	textMargins: margins(0px, 28px, 0px, 4px);
 	textAlign: align(topleft);
 
@@ -1369,6 +1362,9 @@ historySendActionChooseStickerEyeWidth: 7px;
 historySendActionChooseStickerEyeHeight: 11px;
 historySendActionChooseStickerEyeStep: 2px;
 
+historySendActionRoundPosition: point(3px, -4px);
+historySendActionRoundRadius: 4px;
+
 PeerListItem {
 	left: pixels;
 	bottom: pixels;
@@ -1536,7 +1532,9 @@ defaultSideBarButton: SideBarButton {
 	textFg: sideBarTextFg;
 	textFgActive: sideBarTextFgActive;
 	badgeBg: sideBarBadgeBg;
+	badgeBgActive: sideBarBadgeBgActive;
 	badgeBgMuted: sideBarBadgeBgMuted;
+	badgeBgMutedActive: sideBarBadgeBgMutedActive;
 	badgeFg: sideBarBadgeFg;
 	ripple: RippleAnimation(defaultRippleAnimation) {
 		color: sideBarBgRipple;
@@ -1555,7 +1553,7 @@ defaultToast: Toast {
 	padding: margins(19px, 13px, 19px, 12px);
 	margin: margins(13px, 13px, 13px, 13px);
 	maxWidth: 480px;
-	radius: 6px;
+	radius: 8px;
 	durationFadeIn: 200;
 	durationFadeOut: 1000;
 	durationSlide: 160;
@@ -1683,6 +1681,7 @@ callShadow: Shadow {
 
 sideBarButtonLockArcOffset: 2px;
 sideBarButtonLockSize: size(9px, 10px);
+sideBarButtonLockCornerShift: 5px;
 sideBarButtonLockArcHeight: 3px;
 sideBarButtonLockBlockHeight: 5px;
 sideBarButtonLockPenWidth: 3px;

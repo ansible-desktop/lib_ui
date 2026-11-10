@@ -32,6 +32,19 @@ struct IconEmojiData {
 	return result;
 }
 
+[[nodiscard]] QString ColorizedEntityData(int index, int backgroundIndex) {
+	if (!index && !backgroundIndex) {
+		return QString();
+	}
+	auto result = QString();
+	result.reserve(backgroundIndex ? 2 : 1);
+	result.push_back(QChar(index));
+	if (backgroundIndex) {
+		result.push_back(QChar(backgroundIndex));
+	}
+	return result;
+}
+
 [[nodiscard]] IconEmojiData &IconEmojiInfo() {
 	static IconEmojiData result;
 	return result;
@@ -126,13 +139,19 @@ TextWithEntities Link(TextWithEntities text, int index) {
 	return Link(std::move(text), u"internal:index"_q + QChar(index));
 }
 
-TextWithEntities Colorized(const QString &text, int index) {
-	const auto data = index ? QString(QChar(index)) : QString();
+TextWithEntities Colorized(
+		const QString &text,
+		int index,
+		int backgroundIndex) {
+	const auto data = ColorizedEntityData(index, backgroundIndex);
 	return WithSingleEntity(text, EntityType::Colorized, data);
 }
 
-TextWithEntities Colorized(TextWithEntities text, int index) {
-	const auto data = index ? QString(QChar(index)) : QString();
+TextWithEntities Colorized(
+		TextWithEntities text,
+		int index,
+		int backgroundIndex) {
+	const auto data = ColorizedEntityData(index, backgroundIndex);
 	return Wrapped(std::move(text), EntityType::Colorized, data);
 }
 
@@ -232,9 +251,6 @@ TextWithEntities Mid(const TextWithEntities &text, int position, int n) {
 		const auto r2 = midEnd - 1;
 		return !(l1 > r2 || l2 > r1);
 	}) | ranges::views::transform([&](const EntityInText &entity) {
-		if ((entity.offset() == position) && (entity.length() == n)) {
-			return entity;
-		}
 		const auto start = std::max(entity.offset(), position);
 		const auto end = std::min(entity.offset() + entity.length(), midEnd);
 		return EntityInText(

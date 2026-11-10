@@ -6,13 +6,33 @@
 //
 #include "ui/widgets/rp_window.h"
 
+#include "ui/gl/gl_surface.h"
 #include "ui/platform/ui_platform_window.h"
 
 namespace Ui {
 
 RpWindow::RpWindow(QWidget *parent)
 : RpWidget(parent)
-, _helper(Platform::CreateWindowHelper(this)) {
+, _helper([&] {
+	GL::EnsureWindowRhi(this);
+	return Platform::CreateWindowHelper(this);
+}()) {
+	Expects(_helper != nullptr);
+
+	_helper->initInWindow(this);
+	hide();
+}
+
+RpWindow::RpWindow(bool translucent, QWidget *parent)
+: RpWidget(parent)
+, _helper([&]() -> std::unique_ptr<Platform::BasicWindowHelper> {
+	if (translucent) {
+		setAttribute(Qt::WA_NoSystemBackground, true);
+		setAttribute(Qt::WA_TranslucentBackground, true);
+	}
+	GL::EnsureWindowRhi(this);
+	return Platform::CreateWindowHelper(this);
+}()) {
 	Expects(_helper != nullptr);
 
 	_helper->initInWindow(this);
@@ -27,6 +47,14 @@ not_null<RpWidget*> RpWindow::body() {
 
 not_null<const RpWidget*> RpWindow::body() const {
 	return _helper->body().get();
+}
+
+RpWidget *RpWindow::titleWidget() {
+	return _helper->titleWidget();
+}
+
+const RpWidget *RpWindow::titleWidget() const {
+	return _helper->titleWidget();
 }
 
 QMargins RpWindow::frameMargins() const {
@@ -52,6 +80,11 @@ rpl::producer<Platform::HitTestResult> RpWindow::systemButtonOver() const {
 
 rpl::producer<Platform::HitTestResult> RpWindow::systemButtonDown() const {
 	return _helper->systemButtonDown();
+}
+
+auto RpWindow::systemCommandRequests() const
+-> rpl::producer<not_null<Platform::SystemCommandRequest*>> {
+	return _helper->systemCommandRequests();
 }
 
 void RpWindow::overrideSystemButtonOver(Platform::HitTestResult button) {

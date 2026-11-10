@@ -49,6 +49,35 @@ void OverlayWidgetCache(QPainter &p, Ui::RpWidget *widget) {
 	}
 }
 
+[[nodiscard]] QRect ClampToAvailable(QRect geometry, const QRect &available) {
+	if (available.isNull()) {
+		return geometry;
+	}
+	auto topLeft = geometry.topLeft();
+	if (topLeft.x() + geometry.width() > available.x() + available.width()) {
+		topLeft.setX(available.x() + available.width() - geometry.width());
+	}
+	if (topLeft.x() < available.x()) {
+		topLeft.setX(available.x());
+	}
+	if (topLeft.y() + geometry.height() > available.y() + available.height()) {
+		topLeft.setY(available.y() + available.height() - geometry.height());
+	}
+	if (topLeft.y() < available.y()) {
+		topLeft.setY(available.y());
+	}
+	geometry.moveTopLeft(topLeft);
+	return geometry;
+}
+
+[[nodiscard]] bool SameForeignParent(
+		const Platform::ForeignParent &a,
+		const Platform::ForeignParent &b) {
+	return (a.type == b.type)
+		&& (a.x11 == b.x11)
+		&& (a.wayland == b.wayland);
+}
+
 class PanelShow final : public Show {
 public:
 	explicit PanelShow(not_null<SeparatePanel*> panel);
@@ -83,26 +112,11 @@ private:
 			uchar(value.alpha()));
 	};
 
-	const auto contrast = 2.5;
-	const auto luminance = 0.2126 * color.redF()
-		+ 0.7152 * color.greenF()
-		+ 0.0722 * color.blueF();
-	const auto textColor = (luminance > 0.5)
-		? QColor(0, 0, 0)
-		: QColor(255, 255, 255);
-	const auto textLuminance = (luminance > 0.5) ? 0 : 1;
-	const auto adaptiveOpacity = (luminance - textLuminance + contrast)
-		/ contrast;
-	const auto opacity = std::clamp(adaptiveOpacity, 0.5, 0.64);
-	auto buttonColor = textColor;
-	buttonColor.setAlphaF(opacity);
-	auto rippleColor = textColor;
-	rippleColor.setAlphaF(opacity * 0.1);
-
-	set(result->windowFg(), textColor);
-	set(result->boxTitleCloseFg(), buttonColor);
-	set(result->boxTitleCloseFgOver(), buttonColor);
-	set(result->windowBgOver(), rippleColor);
+	const auto colors = ComputeContrastColors(color);
+	set(result->windowFg(), colors.text);
+	set(result->boxTitleCloseFg(), colors.control);
+	set(result->boxTitleCloseFgOver(), colors.control);
+	set(result->windowBgOver(), colors.ripple);
 
 	result->finalize();
 	return result;
@@ -152,6 +166,25 @@ PanelShow::operator bool() const {
 }
 
 } // namespace
+
+ContrastColors ComputeContrastColors(QColor background) {
+	const auto contrast = 2.5;
+	const auto luminance = 0.2126 * background.redF()
+		+ 0.7152 * background.greenF()
+		+ 0.0722 * background.blueF();
+	const auto text = (luminance > 0.5)
+		? QColor(0, 0, 0)
+		: QColor(255, 255, 255);
+	const auto textLuminance = (luminance > 0.5) ? 0 : 1;
+	const auto adaptiveOpacity = (luminance - textLuminance + contrast)
+		/ contrast;
+	const auto opacity = std::clamp(adaptiveOpacity, 0.5, 0.64);
+	auto control = text;
+	control.setAlphaF(opacity);
+	auto ripple = text;
+	ripple.setAlphaF(opacity * 0.1);
+	return { text, control, ripple };
+}
 
 class SeparatePanel::FullScreenButton : public RippleButton {
 public:
@@ -389,6 +422,7 @@ void SeparatePanel::ResizeEdge::updateFromResize(QPoint delta) {
 
 SeparatePanel::SeparatePanel(SeparatePanelArgs &&args)
 : RpWidget(args.parent)
+, _transientParent(std::move(args.transientParent))
 , _menuSt(args.menuSt ? *args.menuSt : st::popupMenuWithIcons)
 , _close(this, st::separatePanelClose)
 , _back(this, object_ptr<IconButton>(this, st::separatePanelBack))
@@ -402,15 +436,25 @@ SeparatePanel::SeparatePanel(SeparatePanelArgs &&args)
 	rpl::combine(
 		shownValue(),
 		_fullscreen.value()
-	) | rpl::filter([=](bool shown, bool) {
-		return shown;
-	}) | rpl::on_next([=](bool, bool fullscreen) {
+	) | rpl::on_next([=](bool shown, bool fullscreen) {
+		if (!shown) {
+			_exposed = false;
+			return;
+		}
 		if (_animationCache.isNull()) {
 			updateControlsVisibility(fullscreen);
 		}
 		Platform::SetWindowMargins(
 			this,
 			_useTransparency ? computePadding() : QMargins());
+		Platform::SetForeignTransientParent(this, _transientParent);
+	}, lifetime());
+
+	events(
+	) | rpl::filter([=](not_null<QEvent*> e) {
+		return (e->type() == QEvent::WindowStateChange);
+	}) | rpl::on_next([=] {
+		_fullscreen = isFullScreen();
 	}, lifetime());
 
 	Platform::FullScreenEvents(
@@ -418,8 +462,6 @@ SeparatePanel::SeparatePanel(SeparatePanelArgs &&args)
 	) | rpl::on_next([=](Platform::FullScreenEvent event) {
 		if (event == Platform::FullScreenEvent::DidEnter) {
 			createFullScreenButtons();
-		} else if (event == Platform::FullScreenEvent::WillExit) {
-			_fullscreen = false;
 		}
 	}, lifetime());
 }
@@ -439,11 +481,22 @@ void SeparatePanel::setTitleHeight(int height) {
 	updateControlsGeometry();
 }
 
-void SeparatePanel::setTitleBadge(object_ptr<RpWidget> badge) {
-	if (badge) {
-		badge->setParent(this);
+void SeparatePanel::setTitleBadge(TitleBadgeDescriptor descriptor) {
+	if (!descriptor.paint || descriptor.size.isEmpty()) {
+		_titleBadge.destroy();
+	} else {
+		_titleBadge = object_ptr<RpWidget>(this);
+		const auto raw = _titleBadge.data();
+		raw->resize(descriptor.size);
+		raw->paintRequest() | rpl::on_next([
+			raw,
+			paint = std::move(descriptor.paint)
+		](const QRect &) {
+			auto p = QPainter(raw);
+			paint(p, raw->size());
+		}, raw->lifetime());
+		raw->setVisible(!_fullscreen.current());
 	}
-	_titleBadge = std::move(badge);
 	updateTitleGeometry(width());
 }
 
@@ -471,6 +524,7 @@ void SeparatePanel::initControls() {
 		} else if (!_fsClose) {
 			createFullScreenButtons();
 		}
+		updateControlsGeometry();
 	}, lifetime());
 
 	rpl::combine(
@@ -560,6 +614,7 @@ void SeparatePanel::initFullScreenButton(not_null<QWidget*> button) {
 	button->windowHandle()->setScreen(windowHandle()->screen());
 #endif
 	button->show();
+	Platform::KeepOnCurrentSpace(button);
 }
 
 void SeparatePanel::updateTitleButtonColors(not_null<IconButton*> button) {
@@ -725,6 +780,13 @@ rpl::producer<> SeparatePanel::closeEvents() const {
 void SeparatePanel::setBackAllowed(bool allowed) {
 	_backAllowed = allowed;
 	updateBackToggled();
+}
+
+void SeparatePanel::setCloseAllowed(bool allowed) {
+	if (_closeAllowed != allowed) {
+		_closeAllowed = allowed;
+		updateControlsVisibility(_fullscreen.current());
+	}
 }
 
 void SeparatePanel::updateBackToggled() {
@@ -902,7 +964,9 @@ void SeparatePanel::toggleSearch(bool shown) {
 }
 
 void SeparatePanel::showMenu(Fn<void(const Menu::MenuCallback&)> fill) {
-	const auto created = createMenu(_menuToggle);
+	const auto created = createMenu(_fsMenuToggle
+		? not_null<RippleButton*>(_fsMenuToggle.get())
+		: not_null<RippleButton*>(_menuToggle.data()));
 	if (!created) {
 		return;
 	}
@@ -920,7 +984,7 @@ void SeparatePanel::showMenu(Fn<void(const Menu::MenuCallback&)> fill) {
 	}
 }
 
-bool SeparatePanel::createMenu(not_null<IconButton*> button) {
+bool SeparatePanel::createMenu(not_null<RippleButton*> button) {
 	if (_menu) {
 		return false;
 	}
@@ -946,6 +1010,13 @@ void SeparatePanel::setHideOnDeactivate(bool hideOnDeactivate) {
 	} else if (!isActiveWindow()) {
 		LOG(("Export Info: Panel Hide On Inactive Change."));
 		hideGetDuration();
+	}
+}
+
+void SeparatePanel::setAnchorData(Platform::ForeignParent transientParent) {
+	if (!SameForeignParent(_transientParent, transientParent)) {
+		_transientParent = std::move(transientParent);
+		Platform::SetForeignTransientParent(this, _transientParent);
 	}
 }
 
@@ -1097,7 +1168,7 @@ void SeparatePanel::updateControlsVisibility(bool fullscreen) {
 	if (_titleBadge) {
 		_titleBadge->setVisible(!fullscreen);
 	}
-	_close->setVisible(!fullscreen);
+	_close->setVisible(_closeAllowed && !fullscreen);
 	if (_menuToggle) {
 		_menuToggle->setVisible(!fullscreen);
 	}
@@ -1132,6 +1203,16 @@ int SeparatePanel::hideGetDuration() {
 		return 0;
 	}
 	return st::separatePanelDuration;
+}
+
+void SeparatePanel::hideForStacking() {
+	if (isHidden() && !_visible) {
+		return;
+	}
+	_opacityAnimation.stop();
+	_visible = false;
+	_animationCache = QPixmap();
+	hide();
 }
 
 void SeparatePanel::showBox(
@@ -1289,7 +1370,6 @@ QRect SeparatePanel::innerGeometry() const {
 }
 
 void SeparatePanel::toggleFullScreen(bool fullscreen) {
-	_fullscreen = fullscreen;
 	if (fullscreen) {
 		showFullScreen();
 	} else {
@@ -1317,35 +1397,15 @@ QMargins SeparatePanel::computePadding() const {
 
 void SeparatePanel::initGeometry(QSize size) {
 	const auto active = QApplication::activeWindow();
-	const auto available = !active
-		? QGuiApplication::primaryScreen()->availableGeometry()
-		: active->screen()->availableGeometry();
-	const auto parentGeometry = (active
-		&& active->isVisible()
-		&& active->isActiveWindow())
-		? active->geometry()
+	const auto window = parentWidget() ? parentWidget()->window() : nullptr;
+	const auto parent = (window && window->isVisible()) ? window : active;
+	const auto screen = parent
+		? parent->screen()
+		: QGuiApplication::primaryScreen();
+	const auto available = screen ? screen->availableGeometry() : QRect();
+	const auto parentGeometry = (parent && parent->isVisible())
+		? parent->geometry()
 		: available;
-
-	auto center = parentGeometry.center();
-	if (size.height() > available.height()) {
-		size = QSize(size.width(), available.height());
-	}
-	if (center.x() + size.width() / 2
-		> available.x() + available.width()) {
-		center.setX(
-			available.x() + available.width() - size.width() / 2);
-	}
-	if (center.x() - size.width() / 2 < available.x()) {
-		center.setX(available.x() + size.width() / 2);
-	}
-	if (center.y() + size.height() / 2
-		> available.y() + available.height()) {
-		center.setY(
-			available.y() + available.height() - size.height() / 2);
-	}
-	if (center.y() - size.height() / 2 < available.y()) {
-		center.setY(available.y() + size.height() / 2);
-	}
 	_useTransparency = Platform::TranslucentWindowsSupported();
 	_padding = _useTransparency
 		? st::callShadow.extend
@@ -1360,16 +1420,30 @@ void SeparatePanel::initGeometry(QSize size) {
 
 	setAttribute(Qt::WA_OpaquePaintEvent, !_useTransparency);
 	if (!_fullscreen.current()) {
-		const auto rect = [&] {
-			const auto initRect = QRect(QPoint(), size);
-			const auto shift = center - initRect.center();
-			return initRect.translated(shift).marginsAdded(_padding);
-		}();
-		move(rect.topLeft());
+		if (!available.isNull() && size.height() > available.height()) {
+			size = QSize(size.width(), available.height());
+		}
+		const auto rect = ClampToAvailable([&] {
+			auto result = QRect(QPoint(), size).marginsAdded(_padding);
+			result.moveCenter(parentGeometry.center());
+			return result;
+		}(), available);
 		if (_allowResize) {
 			setMinimumSize(rect.size());
 		} else {
 			setFixedSize(rect.size());
+		}
+		if (_transientParent) {
+			// Don't set the position, so that the WM/compositor itself
+			// places us relative to the transient parent (on X11 that
+			// requires not setting the position hint). WA_Moved is already
+			// set by RpWidget constructor's zero setGeometry call, so it
+			// must be cleared back, otherwise QWidgetPrivate::create
+			// passes the position to the QWindow.
+			resize(rect.size());
+			setAttribute(Qt::WA_Moved, false);
+		} else {
+			Ui::SetGeometryAndScreen(this, rect);
 		}
 		updateControlsGeometry();
 	}
@@ -1407,6 +1481,10 @@ void SeparatePanel::updateControlsGeometry() {
 }
 
 void SeparatePanel::paintEvent(QPaintEvent *e) {
+	if (!_exposed && windowHandle() && windowHandle()->isExposed()) {
+		_exposed = true;
+		Platform::SetForeignTransientParent(this, _transientParent);
+	}
 	auto p = QPainter(this);
 	if (!_animationCache.isNull()) {
 		auto opacity = _opacityAnimation.value(_visible ? 1. : 0.);
@@ -1418,8 +1496,8 @@ void SeparatePanel::paintEvent(QPaintEvent *e) {
 
 			PainterHighQualityEnabler hq(p);
 			auto marginRatio = (1. - opacity) / 5;
-			auto marginWidth = qRound(width() * marginRatio);
-			auto marginHeight = qRound(height() * marginRatio);
+			auto marginWidth = int(base::SafeRound(width() * marginRatio));
+			auto marginHeight = int(base::SafeRound(height() * marginRatio));
 			p.drawPixmap(
 				rect().marginsRemoved(
 					QMargins(

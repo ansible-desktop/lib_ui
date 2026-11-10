@@ -27,6 +27,11 @@ private:
 
 	class StartedEntity {
 	public:
+		struct ColorIndices {
+			uint16 colorIndex = 0;
+			uint16 bgIndex = 0;
+		};
+
 		enum class Type {
 			Flags,
 			Link,
@@ -37,13 +42,22 @@ private:
 
 		explicit StartedEntity(TextBlockFlags flags);
 		explicit StartedEntity(uint16 index, Type type);
+		explicit StartedEntity(ColorIndices indices);
 
 		[[nodiscard]] Type type() const;
 		[[nodiscard]] std::optional<TextBlockFlags> flags() const;
 		[[nodiscard]] std::optional<uint16> linkIndex() const;
-		[[nodiscard]] std::optional<uint16> colorIndex() const;
+		[[nodiscard]] std::optional<ColorIndices> colorIndices() const;
 
 	private:
+		static constexpr auto kBgIndexShift = 6;
+		static constexpr auto kColorIndexMask = AbstractBlock::kMaxColorIndex;
+
+		[[nodiscard]] static constexpr int PackColorIndices(
+			ColorIndices indices) {
+			return indices.colorIndex | (indices.bgIndex << kBgIndexShift);
+		}
+
 		const int _value = 0;
 		const Type _type;
 
@@ -56,7 +70,7 @@ private:
 		const MarkedContext &context,
 		ReadyToken);
 
-	void trimSourceRange();
+	void trimSourceRange(const TextParseOptions &options);
 	void createBlock(int skipBack = 0);
 	void createNewlineBlock(bool fromOriginalText);
 	void ensureAtNewline(QuoteDetails quote);
@@ -71,11 +85,17 @@ private:
 	void finishEntities();
 	void skipPassedEntities();
 	void skipBadEntities();
+	void skipWaitingEntity();
 
 	bool isInvalidEntity(const EntityInText &entity) const;
 	bool isLinkEntity(const EntityInText &entity) const;
+	bool isReplacedEntity(const EntityInText &entity) const;
+
+	void collectReplacedRanges();
+	[[nodiscard]] bool hasReplacedPart(const EntityInText &entity) const;
 
 	bool processCustomIndex(uint16 index);
+	[[nodiscard]] uint16 pushInternal(EntityLinkData &&data);
 
 	void parse(const TextParseOptions &options);
 	void computeLinkText(
@@ -96,7 +116,11 @@ private:
 	QString _customEmojiData;
 	const bool _multiline = false;
 
+	std::vector<uint16> _skippedLinkIndices;
 	std::vector<uint16> _linksIndexes;
+	base::flat_map<uint16, uint16> _customLinkIndices; // _links -> custom.
+	std::vector<int> _internalBlocks; // Blocks with _internals indices.
+	ReplacedTextRanges _replacedRanges;
 
 	std::vector<EntityLinkData> _links;
 	std::vector<EntityLinkData> _internals;
@@ -111,6 +135,7 @@ private:
 	TextBlockFlags _flags;
 	uint16 _linkIndex = 0;
 	uint16 _colorIndex = 0;
+	uint16 _bgIndex = 0;
 	uint16 _internalIndex = 0;
 	uint16 _quoteIndex = 0;
 	int _quoteStartPosition = 0;

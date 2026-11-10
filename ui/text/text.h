@@ -6,6 +6,8 @@
 //
 #pragma once
 
+#include "ui/ui_fixed.h"
+
 #include "ui/text/text_entity.h"
 #include "ui/click_handler.h"
 #include "base/flags.h"
@@ -145,6 +147,12 @@ struct StateRequestElided : StateRequest {
 	int removeFromEnd = 0;
 };
 
+struct CustomEmojiLinkTexts {
+	QString tooltip;
+	QString copyText;
+	QString copyContextItemText;
+};
+
 class SpoilerMessCache {
 public:
 	explicit SpoilerMessCache(int capacity);
@@ -164,6 +172,8 @@ private:
 struct SpecialColor {
 	const QPen *pen = nullptr;
 	const QPen *penSelected = nullptr;
+	const QBrush *bg = nullptr;
+	const QBrush *bgSelected = nullptr;
 };
 
 struct LineGeometry {
@@ -176,6 +186,7 @@ struct LineLayoutInfo {
 	int width = 0;
 	int bottom = 0;
 	bool rtl = false;
+	int baseline = 0;
 };
 struct GeometryDescriptor {
 	Fn<LineGeometry(int line)> layout;
@@ -240,6 +251,14 @@ struct HighlightInfoRequest {
 	QRect interpolateTo;
 	float64 interpolateProgress = 0.;
 	QPainterPath *outPath = nullptr;
+};
+
+struct HighlightRectsRequest {
+	QPoint position;
+	GeometryDescriptor geometry;
+	style::align align = style::al_left;
+	QRect clip;
+	float64 ratio = 1.;
 };
 
 struct PaintContext {
@@ -312,7 +331,8 @@ public:
 		int width,
 		LineWidthsOptions options) const;
 	[[nodiscard]] std::vector<LineLayoutInfo> countLinesGeometry(
-		int width) const;
+		int width,
+		bool breakEverywhere = false) const;
 
 	struct DimensionsResult {
 		int width = 0;
@@ -350,7 +370,8 @@ public:
 	[[nodiscard]] bool hasCustomEmoji() const;
 	void setCustomEmojiClickHandler(
 		Fn<bool(QStringView)> predicate,
-		Fn<void(QStringView, ClickContext)> callback);
+		Fn<void(QStringView, ClickContext)> callback,
+		Fn<CustomEmojiLinkTexts(QStringView)> texts = nullptr);
 
 	[[nodiscard]] bool hasCollapsedBlockquots() const;
 	[[nodiscard]] bool blockquoteCollapsed(int index) const;
@@ -369,6 +390,9 @@ public:
 	[[nodiscard]] int minHeight() const {
 		return _minHeight;
 	}
+	[[nodiscard]] int minResizeWidth() const {
+		return _minResizeWidth;
+	}
 	[[nodiscard]] int countMaxMonospaceWidth() const;
 
 	void draw(QPainter &p, const PaintContext &context) const;
@@ -376,6 +400,9 @@ public:
 		QPoint point,
 		GeometryDescriptor geometry,
 		StateRequest request = StateRequest()) const;
+	[[nodiscard]] std::vector<QRect> countHighlightRects(
+		std::span<const TextSelection> ranges,
+		const HighlightRectsRequest &request) const;
 
 	void draw(Painter &p, int32 left, int32 top, int32 width, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, TextSelection selection = { 0, 0 }, bool fullWidthSelection = true) const;
 	void drawElided(Painter &p, int32 left, int32 top, int32 width, int32 lines = 1, style::align align = style::al_left, int32 yFrom = 0, int32 yTo = -1, int32 removeFromEnd = 0, bool breakEverywhere = false, TextSelection selection = { 0, 0 }) const;
@@ -451,6 +478,15 @@ private:
 
 	};
 
+	struct LineMetrics {
+		Fixed ascent = 0;
+		Fixed descent = 0;
+
+		[[nodiscard]] int height() const {
+			return (ascent + descent).toInt();
+		}
+	};
+
 	[[nodiscard]] not_null<ExtendedData*> ensureExtended();
 	[[nodiscard]] not_null<QuotesData*> ensureQuotes();
 
@@ -465,11 +501,20 @@ private:
 		int fullLengthOverride = -1) const;
 
 	[[nodiscard]] QuoteDetails *quoteByIndex(int index) const;
+	[[nodiscard]] const ClickHandlerPtr &linkByIndex(uint16 index) const;
 	[[nodiscard]] const style::QuoteStyle &quoteStyle(
 		not_null<QuoteDetails*> quote) const;
 	[[nodiscard]] QMargins quotePadding(QuoteDetails *quote) const;
 	[[nodiscard]] int quoteMinWidth(QuoteDetails *quote) const;
 	[[nodiscard]] const QString &quoteHeaderText(QuoteDetails *quote) const;
+	[[nodiscard]] Fixed blockBaselineShift(const AbstractBlock *block) const;
+	[[nodiscard]] LineMetrics defaultLineMetrics() const;
+	[[nodiscard]] LineMetrics resolveLineMetrics(
+		int lineStart,
+		int lineEnd,
+		int blockIndexHint) const;
+	[[nodiscard]] bool hasObjectAtPosition(int position) const;
+	[[nodiscard]] bool hasReplacementObjectAtPosition(int position) const;
 
 	// Returns -1 in case there is no limit.
 	[[nodiscard]] int quoteLinesLimit(QuoteDetails *quote) const;
@@ -491,8 +536,8 @@ private:
 		FlagsChangeCallback flagsChangeCallback) const;
 
 	// Template method for countWidth(), countHeight(), countLineWidths().
-	// callback(lineWidth, lineBottom, lineLeft) will be called for all lines
-	// with: QFixed lineWidth, int lineBottom, int lineLeft
+	// callback(lineWidth, lineBottom, lineLeft, lineBaseline, rtl)
+	// will be called for all lines.
 	template <typename Callback>
 	void enumerateLines(
 		int w,
@@ -518,6 +563,15 @@ private:
 	const style::TextStyle *_st = nullptr;
 	QString _text;
 	std::vector<Block> _blocks;
+
+	// Taken anew from a counter of the library by everything that changes
+	// what is laid out, so that anything keeping a result of laying it out
+	// can tell whether that result is of what is here now. A number of its
+	// own is not enough for that: a string keeps its address while the text
+	// in it is replaced, hands that address to the next string when it is
+	// gone, and takes the count of another string when one is moved into it -
+	// so what tells one text from another must not be counted per string.
+	uint _layoutId = 0;
 	std::vector<Word> _words;
 	ExtendedWrap _extended;
 
@@ -531,6 +585,7 @@ private:
 	bool _isIsolatedEmoji : 1 = false;
 	bool _isOnlyCustomEmoji : 1 = false;
 	bool _hasNotEmojiAndSpaces : 1 = false;
+	bool _hasSubscriptsOrSuperscripts : 1 = false;
 	bool _skipBlockAddedNewline : 1 = false;
 	bool _endsWithQuoteOrOtherDirection : 1 = false;
 
@@ -539,11 +594,18 @@ private:
 	friend class Renderer;
 	friend class BidiAlgorithm;
 	friend class StackEngine;
+	friend class Paragraph;
+	friend class LineShaper;
 
 };
 
 [[nodiscard]] bool IsBad(QChar ch);
 [[nodiscard]] bool IsWordSeparator(QChar ch);
+[[nodiscard]] bool IsWordSeparator(const QString &text, int position);
+[[nodiscard]] bool IsWordSeparator(
+	Fn<QChar(int)> at,
+	int length,
+	int position);
 [[nodiscard]] bool IsAlmostLinkEnd(QChar ch);
 [[nodiscard]] bool IsLinkEnd(QChar ch);
 [[nodiscard]] bool IsNewline(QChar ch);

@@ -10,12 +10,7 @@
 #include "ui/text/text_block.h"
 #include "ui/text/text_custom_emoji.h"
 
-#include <private/qtextengine_p.h>
-
-class QTextItemInt;
-struct QScriptAnalysis;
-struct QScriptLine;
-struct QScriptItem;
+#include "ui/text/text_shaper.h"
 
 namespace Ui::Text {
 
@@ -24,8 +19,8 @@ inline constexpr auto kQuoteCollapsedLines = 3;
 class AbstractBlock;
 
 struct FixedRange {
-	QFixed from;
-	QFixed till;
+	Fixed from;
+	Fixed till;
 
 	[[nodiscard]] bool empty() const {
 		return (till <= from);
@@ -47,11 +42,15 @@ public:
 		QPoint point,
 		GeometryDescriptor geometry,
 		StateRequest request);
+	[[nodiscard]] std::vector<QRect> highlightRects(
+		std::span<const TextSelection> ranges,
+		const HighlightRectsRequest &request);
 
 private:
 	static constexpr int kSpoilersRectsSize = 512;
 
 	struct BidiControl;
+	struct HighlightBatch;
 
 	void enumerate();
 
@@ -61,6 +60,7 @@ private:
 		int16 paragraphIndex,
 		Qt::LayoutDirection direction);
 	void initNextLine();
+	void resolveLineGeometry(uint16 lineEnd);
 	void initParagraphBidi();
 	bool drawLine(
 		uint16 lineEnd,
@@ -68,20 +68,39 @@ private:
 	bool drawLinePostprocessed(
 		uint16 lineEnd,
 		Blocks::const_iterator blocksEnd);
-	[[nodiscard]] FixedRange findSelectEmojiRange(
-		const QScriptItem &si,
+	void lookupLineEdge(uint16 lineEnd, bool pastLineEnd);
+	[[nodiscard]] FixedRange findSelectObjectRange(
+		const Item &item,
 		std::vector<Block>::const_iterator blockIt,
-		QFixed x,
+		Fixed x,
 		TextSelection selection) const;
 	[[nodiscard]] FixedRange findSelectTextRange(
-		const QScriptItem &si,
-		int itemStart,
-		int itemEnd,
-		QFixed x,
-		QFixed itemWidth,
-		const QTextItemInt &gf,
+		const Item &item,
+		const ShapedItem &shaped,
+		int drawFrom,
+		int drawTill,
+		Fixed x,
+		Fixed itemWidth,
 		TextSelection selection) const;
+	[[nodiscard]] bool collectLineHighlights(
+		const QString &lineText,
+		int lineStart,
+		int lineLength,
+		Fixed x,
+		bool emptyLine);
+	void appendTextHighlights(
+		const Item &item,
+		const ShapedItem &shaped,
+		int drawFrom,
+		int drawTill,
+		Fixed x,
+		Fixed itemWidth);
+	void appendObjectHighlight(
+		const Item &item,
+		std::vector<Block>::const_iterator blockIt,
+		Fixed x);
 	void fillSelectRange(FixedRange range);
+	void fillSelectRange(FixedRange range, int top, int height);
 	void pushHighlightRange(FixedRange range);
 	void pushSpoilerRange(
 		FixedRange range,
@@ -115,9 +134,7 @@ private:
 
 	void fillParagraphBg(int paddingBottom);
 
-	void applyBlockProperties(
-		QTextEngine &e,
-		not_null<const AbstractBlock*> block);
+	void applyBlockProperties(not_null<const AbstractBlock*> block);
 	[[nodiscard]] ClickHandlerPtr lookupLink(
 		const AbstractBlock *block) const;
 
@@ -137,6 +154,8 @@ private:
 	const QPen *_currentPen = nullptr;
 	const QPen *_currentPenSelected = nullptr;
 	struct {
+		const QBrush *brush = nullptr;
+		const QBrush *brushSelected = nullptr;
 		bool spoiler = false;
 		bool selectActiveBlock = false; // For monospace.
 	} _background;
@@ -145,6 +164,7 @@ private:
 	TextSelection _selection = { 0, 0 };
 	bool _fullWidthSelection = true;
 	HighlightInfoRequest *_highlight = nullptr;
+	HighlightBatch *_batch = nullptr;
 	const QChar *_str = nullptr;
 	mutable crl::time _cachedNow = 0;
 	float64 _spoilerOpacity = 0.;
@@ -164,7 +184,8 @@ private:
 	Qt::LayoutDirection _paragraphDirection = Qt::LayoutDirectionAuto;
 	int _paragraphStart = 0;
 	int _paragraphLength = 0;
-	QVarLengthArray<QScriptAnalysis, 4096> _paragraphAnalysis;
+	Paragraph _paragraph;
+	QFont _drawFont;
 
 	// current quote data
 	QuoteDetails *_quote = nullptr;
@@ -188,11 +209,12 @@ private:
 	int _startLeft = 0;
 	int _startTop = 0;
 	int _startLineWidth = 0;
-	QFixed _x, _wLeft, _last_rPadding;
+	Fixed _x, _wLeft, _last_rPadding;
 	int _y = 0;
-	int _yDelta = 0;
+	Fixed _yDelta = 0;
 	int _lineIndex = 0;
 	int _lineHeight = 0;
+	Fixed _lineAscent = 0;
 	int _fontHeight = 0;
 	bool _breakEverywhere = false;
 	bool _elidedLine = false;
@@ -205,11 +227,11 @@ private:
 	int _lineStart = 0;
 	int _localFrom = 0;
 	int _lineStartBlock = 0;
-	QFixed _lineStartPadding = 0;
-	QFixed _lineWidth = 0;
+	Fixed _lineStartPadding = 0;
+	Fixed _lineWidth = 0;
 
 	// link and symbol resolve
-	QFixed _lookupX = 0;
+	Fixed _lookupX = 0;
 	int _lookupY = 0;
 	bool _lookupSymbol = false;
 	bool _lookupLink = false;

@@ -9,7 +9,9 @@
 #include "base/algorithm.h"
 #include "base/debug_log.h"
 #include "base/base_file_utilities.h"
-#include "ui/integration.h"
+#include "ui/text/text_shaper.h"
+
+#include <atomic>
 
 #include <QtCore/QMap>
 #include <QtCore/QVector>
@@ -40,6 +42,8 @@ void style_InitFontsResource() {
 
 namespace style {
 namespace {
+
+constexpr auto kSubSuperMultiplier = 0.75;
 
 QString Custom;
 
@@ -320,23 +324,30 @@ struct Metrics {
 
 	const auto adjust = (overriden || system);
 	const auto metrics = ComputeMetrics(font, adjust);
-	font.setPixelSize(metrics.pixelSize);
 
-	font.setWeight((flags & (FontFlag::Bold | FontFlag::Semibold))
-		? QFont::DemiBold
-		: QFont::Normal);
-	if (font.bold()) {
-		const auto style = QFontInfo(font).styleName();
-		if (!style.isEmpty() && !style.startsWith(
-				"Semibold",
-				Qt::CaseInsensitive)) {
-			font.setBold(true);
-		}
+	if (monospace || !(flags & FontFlag::SubOrSuper)) {
+		font.setPixelSize(metrics.pixelSize);
+	} else {
+		font.setPixelSize(
+			int(base::SafeRound(metrics.pixelSize * kSubSuperMultiplier)));
 	}
+	if (!monospace) {
+		font.setWeight((flags & FontFlag::Bold)
+			? QFont::DemiBold
+			: QFont::Normal);
+		if (font.bold()) {
+			const auto style = QFontInfo(font).styleName();
+			if (!style.isEmpty() && !style.startsWith(
+					"Semibold",
+					Qt::CaseInsensitive)) {
+				font.setBold(true);
+			}
+		}
 
-	font.setItalic(flags & FontFlag::Italic);
-	font.setUnderline(flags & FontFlag::Underline);
-	font.setStrikeOut(flags & FontFlag::StrikeOut);
+		font.setItalic(flags & FontFlag::Italic);
+		font.setUnderline(flags & FontFlag::Underline);
+		font.setStrikeOut(flags & FontFlag::StrikeOut);
+	}
 
 	const auto index = (family == Custom) ? 0 : RegisterFontFamily(family);
 	return {
@@ -364,7 +375,7 @@ void StartFonts() {
 	const auto name = u"Open Sans"_q;
 
 	for (const auto &file : QDir(u":/gui/fonts/"_q).entryInfoList()) {
-		LoadCustomFont(file.canonicalFilePath());
+		LoadCustomFont(Ui::Text::FontPath(file.canonicalFilePath()));
 	}
 
 	if (!QFontInfo(name).family().trimmed().startsWith(
@@ -428,6 +439,9 @@ FontData::FontData(const FontResolveResult &result, FontVariants *modified)
 	descent = height - ascent;
 	spacew = width(QLatin1Char(' '));
 	elidew = width(u"..."_q);
+
+	fascent = Ui::Fixed::FromReal(result.ascent);
+	fleading = Ui::Fixed::FromReal(_m.leading());
 }
 
 Font FontData::bold(bool set) const {
@@ -446,8 +460,8 @@ Font FontData::strikeout(bool set) const {
 	return otherFlagsFont(FontFlag::StrikeOut, set);
 }
 
-Font FontData::semibold(bool set) const {
-	return otherFlagsFont(FontFlag::Semibold, set);
+Font FontData::suborsuper(bool set) const {
+	return otherFlagsFont(FontFlag::SubOrSuper, set);
 }
 
 Font FontData::monospace(bool set) const {
@@ -467,7 +481,11 @@ int FontData::family() const {
 }
 
 Font FontData::otherFlagsFont(FontFlag flag, bool set) const {
-	const auto newFlags = set ? (_flags | flag) : (_flags & ~flag);
+	const auto newFlags = !set
+		? (_flags & ~flag)
+		: ((_flags | flag) & FontFlag::Monospace)
+		? FontFlag::Monospace
+		: (_flags | flag);
 	if (!_modified[newFlags]) {
 		_modified[newFlags] = Font(_size, newFlags, _family, &_modified);
 	}
@@ -507,12 +525,44 @@ void Font::init(
 	_data = &i->second->data;
 }
 
+QString FontData::elided(
+		const QString &str,
+		int width,
+		Qt::TextElideMode mode) const {
+	auto result = _m.elidedText(str, mode, width);
+	if (result != str) {
+		NotifyElided(str, width);
+	}
+	return result;
+}
+
 OwnedFont::OwnedFont(const QString &custom, FontFlags flags, int size)
 : _data(ResolveFont(custom, flags, size), nullptr) {
 	_font._data = &_data;
 }
 
 } // namespace internal
+
+namespace {
+
+std::atomic<ElisionObserver> ElisionObserverInstance = nullptr;
+
+} // namespace
+
+void SetElisionObserver(ElisionObserver observer) {
+	ElisionObserverInstance.store(observer, std::memory_order_release);
+}
+
+bool ElisionObserved() {
+	return ElisionObserverInstance.load(std::memory_order_acquire) != nullptr;
+}
+
+void NotifyElided(const QString &text, int width) {
+	if (const auto observer = ElisionObserverInstance.load(
+			std::memory_order_acquire)) {
+		observer(text, width);
+	}
+}
 
 const FontResolveResult *FindAdjustResult(const QFont &font) {
 	const auto key = internal::QtFontKey(font);
